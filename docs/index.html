@@ -1,121 +1,96 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <title>동숲 AR 체험</title>
-    <link rel="apple-touch-icon" href="icon.png" />
-    <meta name="apple-mobile-web-app-title" content="동숲AR타이틀" />
-
-    <style>
-        body {
-            margin: 0;
-            overflow: hidden;
-            background-color: #222;
-        }
-        video {
-            display: none;
-        }
-        canvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-        }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#ffffff" />
+  <title>Air Taiko Controller</title>
+  <style>
+    body {
+      font-family: -apple-system, sans-serif;
+      background: white;
+      text-align: center;
+      margin: 0;
+      padding: 2rem;
+      transition: background 0.2s;
+    }
+    h1 {
+      font-size: 2rem;
+    }
+    button {
+      font-size: 2rem;
+      padding: 1rem 2rem;
+      border: none;
+      border-radius: 1rem;
+      background-color: #333;
+      color: white;
+      margin-top: 1rem;
+    }
+    .status {
+      font-size: 1.5rem;
+      margin-top: 2rem;
+    }
+  </style>
 </head>
 <body>
+  <h1>🥁 Air Taiko Controller</h1>
+  <button id="toggle">컨트롤러 ON</button>
+  <div class="status" id="status">상태: OFF</div>
 
-<video id="video" autoplay playsinline></video>
-<canvas id="output"></canvas>
+  <script>
+    let isOn = false;
+    let lastHit = 0;
 
-<!-- Three.js CDN -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r150/three.min.js"></script>
-<!-- MediaPipe FaceMesh -->
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4/face_mesh.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    const donSound = new Audio("audio/don.mp3");
+    const katSound = new Audio("audio/katsu.mp3");
 
-<script>
-    // 기본 설정
-    const videoElement = document.getElementById('video');
-    const canvasElement = document.getElementById('output');
-    const canvasCtx = canvasElement.getContext('2d');
+    // iOS 오디오 잠금 해제용 더미 재생
+    document.addEventListener("touchstart", () => {
+      donSound.play().catch(() => {});
+      katSound.play().catch(() => {});
+    }, { once: true });
 
-    // Three.js 초기화
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer({ alpha: true, canvas: canvasElement });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    document.body.appendChild(renderer.domElement);
-
-    // 2D 이미지 텍스처 (동숲 마스크 이미지 사용 예시, 직접 URL 바꿔도 됨)
-    const textureLoader = new THREE.TextureLoader();
-    const maskTexture = textureLoader.load('https://i.imgur.com/2yYAYQy.png'); // 예시 이미지 URL
-    const maskMaterial = new THREE.SpriteMaterial({ map: maskTexture });
-    const maskSprite = new THREE.Sprite(maskMaterial);
-    maskSprite.scale.set(2, 2, 1); // 크기 조절 필요시 수정
-    scene.add(maskSprite);
-
-    camera.position.z = 5;
-
-    function animate() {
-        requestAnimationFrame(animate);
-        renderer.render(scene, camera);
-    }
-    animate();
-
-    // MediaPipe FaceMesh 설정
-    const faceMesh = new FaceMesh({
-        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4/${file}`
-    });
-    faceMesh.setOptions({
-        maxNumFaces: 1,
-        refineLandmarks: true,
-        minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5
+    document.getElementById("toggle").addEventListener("click", () => {
+      isOn = !isOn;
+      document.getElementById("status").textContent = "상태: " + (isOn ? "ON" : "OFF");
+      document.getElementById("toggle").textContent = isOn ? "컨트롤러 OFF" : "컨트롤러 ON";
     });
 
-    faceMesh.onResults(onResults);
+    window.addEventListener("devicemotion", (event) => {
+      if (!isOn) return;
 
-    // 카메라 스트림 설정
-    const cameraInstance = new Camera(videoElement, {
-        onFrame: async () => {
-            await faceMesh.send({ image: videoElement });
-        },
-        width: 640,
-        height: 480
-    });
-    cameraInstance.start();
+      const acc = event.accelerationIncludingGravity;
+      const now = Date.now();
 
-    function onResults(results) {
-        // 비디오 캔버스에 그리기 (디버그용, 필요 없으면 주석처리 가능)
-        canvasCtx.save();
-        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-        canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
-        canvasCtx.restore();
+      if (now - lastHit < 300) return;
 
-        if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-            const landmarks = results.multiFaceLandmarks[0];
-            const nose = landmarks[1]; // 코 끝 landmark (index 1)
+      const x = acc.x ?? 0;
+      const y = acc.y ?? 0;
+      const z = acc.z ?? 0;
+      const total = Math.sqrt(x * x + y * y + z * z);
 
-            // 2D 좌표 -> Three.js 좌표계 변환
-            const x = (nose.x - 0.5) * window.innerWidth / window.innerHeight * camera.aspect * 2;
-            const y = -(nose.y - 0.5) * 2;
-
-            maskSprite.position.set(x, y, 0);
-            maskSprite.scale.set(2, 2, 1); // 필요시 동적 크기 조절 가능
+      if (total > 15) {
+        const angle = Math.atan2(y, z) * (180 / Math.PI);
+        if (Math.abs(angle) < 30) {
+          // 쿵
+          donSound.currentTime = 0;
+          donSound.play();
+          document.body.style.background = "#ffdddd";
+        } else {
+          // 딱
+          katSound.currentTime = 0;
+          katSound.play();
+          document.body.style.background = "#ddddff";
         }
-    }
 
-    // 창 리사이즈 대응
-    window.addEventListener('resize', () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
+        lastHit = now;
+        setTimeout(() => {
+          document.body.style.background = "white";
+        }, 100);
+      }
     });
-</script>
-
+  </script>
 </body>
 </html>
