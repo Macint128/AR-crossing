@@ -2,95 +2,67 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="theme-color" content="#ffffff" />
-  <title>Air Taiko Controller</title>
-  <style>
-    body {
-      font-family: -apple-system, sans-serif;
-      background: white;
-      text-align: center;
-      margin: 0;
-      padding: 2rem;
-      transition: background 0.2s;
-    }
-    h1 {
-      font-size: 2rem;
-    }
-    button {
-      font-size: 2rem;
-      padding: 1rem 2rem;
-      border: none;
-      border-radius: 1rem;
-      background-color: #333;
-      color: white;
-      margin-top: 1rem;
-    }
-    .status {
-      font-size: 1.5rem;
-      margin-top: 2rem;
-    }
-  </style>
+  <title>AR 동이 얼굴</title>
+  <script src="https://unpkg.com/three@0.126.0/build/three.js"></script>
+  <script src="https://unpkg.com/three@0.126.0/examples/jsm/webxr/ARButton.js"></script>
 </head>
-<body>
-  <h1>🥁 Air Taiko Controller</h1>
-  <button id="toggle">컨트롤러 ON</button>
-  <div class="status" id="status">상태: OFF</div>
+<body style="margin:0; overflow:hidden;">
+<script>
+let camera, scene, renderer;
+let reticle, facePlane;
 
-  <script>
-    let isOn = false;
-    let lastHit = 0;
+init();
+async function init() {
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera();
 
-    const donSound = new Audio("audio/don.mp3");
-    const katSound = new Audio("audio/katsu.mp3");
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.xr.enabled = true;
+  document.body.appendChild(renderer.domElement);
 
-    // iOS 오디오 잠금 해제용 더미 재생
-    document.addEventListener("touchstart", () => {
-      donSound.play().catch(() => {});
-      katSound.play().catch(() => {});
-    }, { once: true });
+  document.body.appendChild(ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] }));
 
-    document.getElementById("toggle").addEventListener("click", () => {
-      isOn = !isOn;
-      document.getElementById("status").textContent = "상태: " + (isOn ? "ON" : "OFF");
-      document.getElementById("toggle").textContent = isOn ? "컨트롤러 OFF" : "컨트롤러 ON";
-    });
+  // Reticle (바닥 감지 시 표시)
+  const geometry = new THREE.RingGeometry(0.07, 0.1, 32).rotateX(-Math.PI/2);
+  const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  reticle = new THREE.Mesh(geometry, material);
+  reticle.matrixAutoUpdate = false;
+  reticle.visible = false;
+  scene.add(reticle);
 
-    window.addEventListener("devicemotion", (event) => {
-      if (!isOn) return;
+  // 얼굴 이미지 로드 (PNG 파일 필요: doni-face.png)
+  const loader = new THREE.TextureLoader();
+  const tex = await loader.loadAsync('doni-face.png');
+  const planeGeo = new THREE.PlaneGeometry(0.2, 0.2);
+  const planeMat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
+  facePlane = new THREE.Mesh(planeGeo, planeMat);
+  facePlane.visible = false;
+  scene.add(facePlane);
 
-      const acc = event.accelerationIncludingGravity;
-      const now = Date.now();
+  // Hit-test source 요청
+  const session = renderer.xr.getSession();
+  const refSpace = await session.requestReferenceSpace('local');
+  const viewerSpace = await session.requestReferenceSpace('viewer');
+  const hitSource = await session.requestHitTestSource({ space: viewerSpace });
 
-      if (now - lastHit < 300) return;
-
-      const x = acc.x ?? 0;
-      const y = acc.y ?? 0;
-      const z = acc.z ?? 0;
-      const total = Math.sqrt(x * x + y * y + z * z);
-
-      if (total > 15) {
-        const angle = Math.atan2(y, z) * (180 / Math.PI);
-        if (Math.abs(angle) < 30) {
-          // 쿵
-          donSound.currentTime = 0;
-          donSound.play();
-          document.body.style.background = "#ffdddd";
-        } else {
-          // 딱
-          katSound.currentTime = 0;
-          katSound.play();
-          document.body.style.background = "#ddddff";
-        }
-
-        lastHit = now;
-        setTimeout(() => {
-          document.body.style.background = "white";
-        }, 100);
+  renderer.setAnimationLoop((time, frame) => {
+    if (!frame) return;
+    const pose = frame.getViewerPose(refSpace);
+    if (pose) {
+      const hit = frame.getHitTestResults(hitSource);
+      if (hit.length) {
+        const hitPos = hit[0].getPose(refSpace);
+        reticle.visible = true;
+        reticle.matrix.fromArray(hitPos.transform.matrix);
+        facePlane.visible = true;
+        facePlane.position.copy(reticle.position);
+        facePlane.quaternion.copy(reticle.quaternion);
       }
-    });
-  </script>
+    }
+    renderer.render(scene, camera);
+  });
+}
+</script>
 </body>
 </html>
